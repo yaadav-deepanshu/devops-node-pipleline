@@ -1,61 +1,20 @@
-# Logo Server
+# DevOps Node Pipeline
 
-A simple Express.js web server that serves the Swayatt logo image.
+## Overview
 
-## What is this app?
+This project implements a CI/CD pipeline for a Node.js application (forked from [SwayattDrishtigochar/devops-task](https://github.com/SwayattDrishtigochar/devops-task)) using Jenkins, AWS ECS Fargate, Docker, and Terraform. The app is a simple Express.js server that serves a logo image (`logoswayatt.png`) on port 3000.
 
-This is a lightweight Node.js application built with Express.js that serves a single logo image (`logoswayatt.png`) when accessed through a web browser. When you visit the root URL, the server responds by displaying the Swayatt logo.
+## Features
 
-## Prerequisites
+- **App**: Express.js server serving `logoswayatt.png`.
+- **CI/CD**: Jenkins pipeline for automated build, test, Dockerize, and deployment.
+- **Infra**: AWS ECS Fargate, ECR, ALB, and CloudWatch, provisioned with Terraform.
+- **Branching**: `main` for production, `dev` for integration.
 
-- Node.js (version 12 or higher)
-- npm (Node Package Manager)
+## Getting Started
 
-## Installation
-
-1. Clone or download this repository
-2. Navigate to the project directory:
+1. Clone the repo:
    ```bash
-   cd "devops task"
+   git clone https://github.com/yaadav-deepanshu/devops-node-pipleline.git
+   cd devops-node-pipleline
    ```
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-## How to Start the App
-
-Run the following command:
-```bash
-npm start
-```
-
-The server will start and display:
-```
-Server running on http://localhost:3000
-```
-
-## Usage
-
-Once the server is running, open your web browser and navigate to:
-```
-http://localhost:3000
-```
-
-You will see the Swayatt logo displayed in your browser.
-
-## Project Structure
-
-```
-├── app.js              # Main server file
-├── package.json        # Project dependencies and scripts
-├── logoswayatt.png     # Logo image file
-└── README.md          # This file
-```
-
-## Technical Details
-
-- **Framework**: Express.js
-- **Port**: 3000
-- **Endpoint**: GET `/` - serves the logo image
-- **File served**: `logoswayatt.png`
