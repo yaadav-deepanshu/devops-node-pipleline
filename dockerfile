@@ -2,9 +2,9 @@
 FROM node:18-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --production
-COPY . .
-# No build step needed for this app
+RUN npm ci --production && npm cache clean --force
+COPY app.js ./
+COPY logoswayatt.png ./
 
 # Runtime stage
 FROM node:18-alpine
@@ -13,4 +13,4 @@ RUN addgroup -g 1001 -S nodejs && adduser -S nodeapp -u 1001
 COPY --from=builder --chown=nodeapp:nodejs /app .
 USER nodeapp
 EXPOSE 3000
-CMD ["npm", "start"]
+CMD ["npm", "start"]y
