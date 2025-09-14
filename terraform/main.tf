@@ -1,260 +1,259 @@
-# ECR Repository
-resource "aws_ecr_repository" "app" {
-  name = var.app_name
-}
-
-# ECS Cluster
-resource "aws_ecs_cluster" "app_cluster" {
-  name = "${var.app_name}-cluster"
-}
-
-# IAM Role for ECS Task Execution
-resource "aws_iam_role" "ecs_execution_role" {
-  name = "${var.app_name}-ecs-execution-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_execution_policy" {
-  role       = aws_iam_role.ecs_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
-# CloudWatch Log Group
-resource "aws_cloudwatch_log_group" "app" {
-  name = "/ecs/${var.app_name}"
-}
-
-# ECS Task Definition
-resource "aws_ecs_task_definition" "app_task" {
-  family                   = "${var.app_name}-task"
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  cpu                      = "256"
-  memory                   = "512"
-  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
-  container_definitions = jsonencode([{
-    name  = "${var.app_name}-container"
-    image = "${aws_ecr_repository.app.repository_url}:latest"
-    essential = true
-    portMappings = [{
-      containerPort = 3000
-      hostPort      = 3000
-    }]
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        awslogs-group         = aws_cloudwatch_log_group.app.name
-        awslogs-region        = var.region
-        awslogs-stream-prefix = "ecs"
-      }
-    }
-  }])
-}
-
-# ALB Security Group
-resource "aws_security_group" "alb_sg" {
-  name        = "${var.app_name}-alb-sg"
-  description = "Allow HTTP inbound to ALB"
-  vpc_id      = "vpc-083056b51a6415ac3"
-
-  ingress {
-    description = "HTTP from internet"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+# Creating a VPC
+resource "aws_vpc" "main_vpc" {
+  cidr_block = var.vpc_cidr
+  tags = {
+    Name = "nodejs-logo-server-vpc"
   }
 }
 
-# Target Security Group (for ECS tasks)
-resource "aws_security_group" "app_sg" {
-  name        = "${var.app_name}-sg"
-  description = "Allow traffic from ALB to app on 3000"
-  vpc_id      = "vpc-083056b51a6415ac3"
-
-  ingress {
-    description     = "From ALB to app"
-    from_port       = 3000
-    to_port         = 3000
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+# Creating a public subnet
+resource "aws_subnet" "public_subnet" {
+  vpc_id            = aws_vpc.main_vpc.id
+  cidr_block        = var.subnet_cidr
+  availability_zone = "${var.region}a"
+  tags = {
+    Name = "nodejs-logo-server-subnet"
   }
 }
 
-# ALB
-resource "aws_lb" "app_lb" {
-  name               = "${var.app_name}-alb"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb_sg.id]
-  subnets            = ["subnet-003cae0e4cde74f26", "subnet-048db320bb9d1d065"]
-}
-
-# ALB Target Group
-resource "aws_lb_target_group" "app_tg" {
-  name        = "${var.app_name}-tg"
-  port        = 3000
-  protocol    = "HTTP"
-  vpc_id      = "vpc-083056b51a6415ac3"
-  target_type = "ip"
-  health_check {
-    path                = "/"
-    protocol            = "HTTP"
-    matcher             = "200"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
+# Creating an internet gateway
+resource "aws_internet_gateway" "main_igw" {
+  vpc_id = aws_vpc.main_vpc.id
+  tags = {
+    Name = "nodejs-logo-server-igw"
   }
 }
 
-# ALB Listener
-resource "aws_lb_listener" "app_listener" {
-  load_balancer_arn = aws_lb.app_lb.arn
-  port              = 80
-  protocol          = "HTTP"
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.app_tg.arn
+# Creating a route table
+resource "aws_route_table" "public_route_table" {
+  vpc_id = aws_vpc.main_vpc.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main_igw.id
+  }
+  tags = {
+    Name = "nodejs-logo-server-route-table"
   }
 }
 
-# ECS Service
-resource "aws_ecs_service" "app_service" {
-  name            = "${var.app_name}-service"
-  cluster         = aws_ecs_cluster.app_cluster.id
-  task_definition = aws_ecs_task_definition.app_task.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
-  network_configuration {
-    subnets          = ["subnet-003cae0e4cde74f26", "subnet-048db320bb9d1d065"]
-    security_groups  = [aws_security_group.app_sg.id]
-    assign_public_ip = true
-  }
-  load_balancer {
-    target_group_arn = aws_lb_target_group.app_tg.arn
-    container_name   = "${var.app_name}-container"
-    container_port   = 3000
-  }
+# Associating the route table with the subnet
+resource "aws_route_table_association" "public_subnet_association" {
+  subnet_id      = aws_subnet.public_subnet.id
+  route_table_id = aws_route_table.public_route_table.id
 }
 
-# Jenkins Security Group
+# Creating a security group for Jenkins
 resource "aws_security_group" "jenkins_sg" {
-  name        = "${var.app_name}-jenkins-sg"
-  description = "Allow SSH and Jenkins HTTP inbound"
-  vpc_id      = "vpc-083056b51a6415ac3"
-
+  vpc_id = aws_vpc.main_vpc.id
   ingress {
-    description = "SSH from anywhere"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Jenkins HTTP from anywhere"
     from_port   = 8080
     to_port     = 8080
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+  tags = {
+    Name = "nodejs-logo-server-jenkins-sg"
+  }
 }
 
-# IAM Role for Jenkins EC2
-resource "aws_iam_role" "jenkins_role" {
-  name = "${var.app_name}-jenkins-role"
+# Creating an EC2 instance for Jenkins
+resource "aws_instance" "jenkins_server" {
+  ami           = var.ami_id
+  instance_type = var.instance_type
+  subnet_id     = aws_subnet.public_subnet.id
+  vpc_security_group_ids = [aws_security_group.jenkins_sg.id]
+  key_name      = var.key_name
+  user_data     = <<EOF
+#!/bin/bash
+sudo apt update
+sudo apt install -y openjdk-17-jdk unzip
+curl -fsSL https://pkg.jenkins.io/debian/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
+echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list
+sudo apt update
+sudo apt install -y jenkins
+echo "JAVA_ARGS=\"-Xmx256m -Xms128m\"" | sudo tee -a /etc/default/jenkins
+sudo systemctl start jenkins
+sudo systemctl enable jenkins
+sudo apt install -y docker.io
+sudo usermod -aG docker jenkins
+sudo systemctl restart docker
+sudo systemctl restart jenkins
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt install -y nodejs
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+EOF
+  tags = {
+    Name = "nodejs-logo-server-jenkins"
+  }
+}
+
+# Creating an ECR repository
+resource "aws_ecr_repository" "nodejs_logo_server" {
+  name = "nodejs-logo-server"
+  tags = {
+    Name = "nodejs-logo-server-ecr"
+  }
+}
+
+# Creating an ECS cluster
+resource "aws_ecs_cluster" "nodejs_logo_cluster" {
+  name = "nodejs-logo-server-cluster"
+  tags = {
+    Name = "nodejs-logo-server-cluster"
+  }
+}
+
+# Creating a security group for ECS
+resource "aws_security_group" "ecs_sg" {
+  vpc_id = aws_vpc.main_vpc.id
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = {
+    Name = "nodejs-logo-server-ecs-sg"
+  }
+}
+
+# Creating an ECS task definition
+resource "aws_ecs_task_definition" "nodejs_logo_task" {
+  family                   = "nodejs-logo-server-task"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+  container_definitions    = jsonencode([
+    {
+      name      = "nodejs-logo-server"
+      image     = "${aws_ecr_repository.nodejs_logo_server.repository_url}:latest"
+      essential = true
+      portMappings = [
+        {
+          containerPort = 80
+          hostPort      = 80
+          protocol      = "tcp"
+        }
+      ]
+    }
+  ])
+  tags = {
+    Name = "nodejs-logo-server-task"
+  }
+}
+
+# Creating an ECS service
+resource "aws_ecs_service" "nodejs_logo_service" {
+  name            = "nodejs-logo-server-service"
+  cluster         = aws_ecs_cluster.nodejs_logo_cluster.id
+  task_definition = aws_ecs_task_definition.nodejs_logo_task.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+  network_configuration {
+    subnets          = [aws_subnet.public_subnet.id]
+    security_groups  = [aws_security_group.ecs_sg.id]
+    assign_public_ip = true
+  }
+  load_balancer {
+    target_group_arn = aws_lb_target_group.nodejs_logo_tg.arn
+    container_name   = "nodejs-logo-server"
+    container_port   = 80
+  }
+  depends_on = [aws_lb_listener.http]
+  tags = {
+    Name = "nodejs-logo-server-service"
+  }
+}
+
+# Creating an IAM role for ECS task execution
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name = "nodejs-logo-server-ecs-task-execution-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
   })
-}
-
-resource "aws_iam_role_policy_attachment" "jenkins_policy_ecr" {
-  role       = aws_iam_role.jenkins_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess"
-}
-
-resource "aws_iam_role_policy_attachment" "jenkins_policy_ecs" {
-  role       = aws_iam_role.jenkins_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonECS_FullAccess"
-}
-
-resource "aws_iam_role_policy_attachment" "jenkins_policy_cloudwatch" {
-  role       = aws_iam_role.jenkins_role.name
-  policy_arn = "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
-}
-
-resource "aws_iam_instance_profile" "jenkins_profile" {
-  name = "${var.app_name}-jenkins-profile"
-  role = aws_iam_role.jenkins_role.name
-}
-
-# Jenkins EC2 Instance
-resource "aws_instance" "jenkins" {
-  ami                         = var.ami_id
-  instance_type               = var.instance_type
-  subnet_id                   = "subnet-003cae0e4cde74f26"
-  vpc_security_group_ids      = [aws_security_group.jenkins_sg.id]
-  iam_instance_profile        = aws_iam_instance_profile.jenkins_profile.name
-  associate_public_ip_address = true
-
-  user_data = <<-EOF
-    #!/bin/bash
-    apt update
-    apt install -y openjdk-11-jdk
-    curl -fsSL https://pkg.jenkins.io/debian/jenkins.io.key | tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
-    echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian binary/ | tee /etc/apt/sources.list.d/jenkins.list
-    apt update
-    apt install -y jenkins
-    systemctl start jenkins
-    systemctl enable jenkins
-
-    apt install -y docker.io
-    usermod -aG docker jenkins
-    systemctl restart jenkins
-
-    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-    apt install -y nodejs
-
-    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-    unzip awscliv2.zip
-    ./aws/install
-    EOF
-
   tags = {
-    Name = "${var.app_name}-jenkins"
+    Name = "nodejs-logo-server-ecs-task-execution-role"
+  }
+}
+
+# Attaching the ECS task execution policy
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+# Creating an Application Load Balancer
+resource "aws_lb" "nodejs_logo_alb" {
+  name               = "nodejs-logo-server-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.ecs_sg.id]
+  subnets            = [aws_subnet.public_subnet.id]
+  tags = {
+    Name = "nodejs-logo-server-alb"
+  }
+}
+
+# Creating a target group for the ALB
+resource "aws_lb_target_group" "nodejs_logo_tg" {
+  name        = "nodejs-logo-server-tg"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main_vpc.id
+  target_type = "ip"
+  health_check {
+    path                = "/"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+  }
+  tags = {
+    Name = "nodejs-logo-server-tg"
+  }
+}
+
+# Creating a listener for the ALB
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.nodejs_logo_alb.arn
+  port              = 80
+  protocol          = "HTTP"
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.nodejs_logo_tg.arn
+  }
+  tags = {
+    Name = "nodejs-logo-server-listener"
   }
 }
