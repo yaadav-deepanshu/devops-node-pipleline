@@ -8,18 +8,20 @@ resource "aws_vpc" "main_vpc" {
 
 # Creating public subnets
 resource "aws_subnet" "public_subnet_a" {
-  vpc_id            = aws_vpc.main_vpc.id
-  cidr_block        = var.subnet_cidr_a
-  availability_zone = "${var.region}a"
+  vpc_id                  = aws_vpc.main_vpc.id
+  cidr_block              = var.subnet_cidr_a
+  availability_zone       = "${var.region}a"
+  map_public_ip_on_launch = true
   tags = {
     Name = "nodejs-logo-server-subnet-a"
   }
 }
 
 resource "aws_subnet" "public_subnet_b" {
-  vpc_id            = aws_vpc.main_vpc.id
-  cidr_block        = var.subnet_cidr_b
-  availability_zone = "${var.region}b"
+  vpc_id                  = aws_vpc.main_vpc.id
+  cidr_block              = var.subnet_cidr_b
+  availability_zone       = "${var.region}b"
+  map_public_ip_on_launch = true
   tags = {
     Name = "nodejs-logo-server-subnet-b"
   }
@@ -84,12 +86,12 @@ resource "aws_security_group" "jenkins_sg" {
 
 # Creating an EC2 instance for Jenkins
 resource "aws_instance" "jenkins_server" {
-  ami           = var.ami_id
-  instance_type = var.instance_type
-  subnet_id     = aws_subnet.public_subnet_a.id
+  ami                    = var.ami_id
+  instance_type          = var.instance_type
+  subnet_id              = aws_subnet.public_subnet_a.id
   vpc_security_group_ids = [aws_security_group.jenkins_sg.id]
-  key_name      = var.key_name
-  user_data     = <<EOF
+  key_name               = var.key_name
+  user_data              = <<EOF
 #!/bin/bash
 sudo apt update
 sudo apt install -y openjdk-17-jdk unzip
