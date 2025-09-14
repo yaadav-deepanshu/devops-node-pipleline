@@ -6,13 +6,22 @@ resource "aws_vpc" "main_vpc" {
   }
 }
 
-# Creating a public subnet
-resource "aws_subnet" "public_subnet" {
+# Creating public subnets
+resource "aws_subnet" "public_subnet_a" {
   vpc_id            = aws_vpc.main_vpc.id
-  cidr_block        = var.subnet_cidr
+  cidr_block        = var.subnet_cidr_a
   availability_zone = "${var.region}a"
   tags = {
-    Name = "nodejs-logo-server-subnet"
+    Name = "nodejs-logo-server-subnet-a"
+  }
+}
+
+resource "aws_subnet" "public_subnet_b" {
+  vpc_id            = aws_vpc.main_vpc.id
+  cidr_block        = var.subnet_cidr_b
+  availability_zone = "${var.region}b"
+  tags = {
+    Name = "nodejs-logo-server-subnet-b"
   }
 }
 
@@ -36,9 +45,14 @@ resource "aws_route_table" "public_route_table" {
   }
 }
 
-# Associating the route table with the subnet
-resource "aws_route_table_association" "public_subnet_association" {
-  subnet_id      = aws_subnet.public_subnet.id
+# Associating the route table with subnets
+resource "aws_route_table_association" "public_subnet_a_association" {
+  subnet_id      = aws_subnet.public_subnet_a.id
+  route_table_id = aws_route_table.public_route_table.id
+}
+
+resource "aws_route_table_association" "public_subnet_b_association" {
+  subnet_id      = aws_subnet.public_subnet_b.id
   route_table_id = aws_route_table.public_route_table.id
 }
 
@@ -72,7 +86,7 @@ resource "aws_security_group" "jenkins_sg" {
 resource "aws_instance" "jenkins_server" {
   ami           = var.ami_id
   instance_type = var.instance_type
-  subnet_id     = aws_subnet.public_subnet.id
+  subnet_id     = aws_subnet.public_subnet_a.id
   vpc_security_group_ids = [aws_security_group.jenkins_sg.id]
   key_name      = var.key_name
   user_data     = <<EOF
@@ -172,7 +186,7 @@ resource "aws_ecs_service" "nodejs_logo_service" {
   desired_count   = 1
   launch_type     = "FARGATE"
   network_configuration {
-    subnets          = [aws_subnet.public_subnet.id]
+    subnets          = [aws_subnet.public_subnet_a.id, aws_subnet.public_subnet_b.id]
     security_groups  = [aws_security_group.ecs_sg.id]
     assign_public_ip = true
   }
@@ -219,7 +233,7 @@ resource "aws_lb" "nodejs_logo_alb" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.ecs_sg.id]
-  subnets            = [aws_subnet.public_subnet.id]
+  subnets            = [aws_subnet.public_subnet_a.id, aws_subnet.public_subnet_b.id]
   tags = {
     Name = "nodejs-logo-server-alb"
   }
