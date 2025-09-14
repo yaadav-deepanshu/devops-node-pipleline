@@ -9,16 +9,8 @@ pipeline {
         ECS_TASK = 'nodejs-logo-task'
     }
     stages {
-        stage('Build') {
-            steps {
-                sh 'npm install && npm test'
-            }
-        }
-        stage('Dockerize') {
-            steps {
-                sh "docker build -t ${ECR_REGISTRY}:${IMAGE_TAG} ."
-            }
-        }
+        stage('Build') { steps { sh 'npm install && npm test' } }
+        stage('Dockerize') { steps { sh "docker build -t ${ECR_REGISTRY}:${IMAGE_TAG} ." } }
         stage('Push to ECR') {
             steps {
                 sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
@@ -27,9 +19,7 @@ pipeline {
         }
         stage('Deploy to ECS') {
             when { anyOf { branch 'main'; branch 'dev' } }
-            steps {
-                sh "aws ecs update-service --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --force-new-deployment --region ${AWS_REGION}"
-            }
+            steps { sh "aws ecs update-service --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --force-new-deployment --region ${AWS_REGION}" }
         }
     }
 }
