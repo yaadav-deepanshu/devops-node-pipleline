@@ -84,6 +84,42 @@ resource "aws_security_group" "jenkins_sg" {
   }
 }
 
+# Creating an IAM role for Jenkins EC2 instance
+resource "aws_iam_role" "jenkins_role" {
+  name = "nodejs-logo-server-jenkins-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+  tags = {
+    Name = "nodejs-logo-server-jenkins-role"
+  }
+}
+
+# Attaching policies to the Jenkins IAM role
+resource "aws_iam_role_policy_attachment" "jenkins_ecr_policy" {
+  role       = aws_iam_role.jenkins_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "jenkins_ecs_policy" {
+  role       = aws_iam_role.jenkins_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonECS_FullAccess"
+}
+
+resource "aws_iam_instance_profile" "jenkins_profile" {
+  name = "nodejs-logo-server-jenkins-profile"
+  role = aws_iam_role.jenkins_role.name
+}
+
 # Creating an EC2 instance for Jenkins
 resource "aws_instance" "jenkins_server" {
   ami                    = var.ami_id
@@ -91,26 +127,54 @@ resource "aws_instance" "jenkins_server" {
   subnet_id              = aws_subnet.public_subnet_a.id
   vpc_security_group_ids = [aws_security_group.jenkins_sg.id]
   key_name               = var.key_name
+  iam_instance_profile   = aws_iam_instance_profile.jenkins_profile.name
   user_data              = <<EOF
 #!/bin/bash
-sudo apt update
-sudo apt install -y openjdk-17-jdk unzip
-curl -fsSL https://pkg.jenkins.io/debian/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
-echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list
-sudo apt update
-sudo apt install -y jenkins
-echo "JAVA_ARGS=\"-Xmx256m -Xms128m\"" | sudo tee -a /etc/default/jenkins
-sudo systemctl start jenkins
-sudo systemctl enable jenkins
-sudo apt install -y docker.io
-sudo usermod -aG docker jenkins
-sudo systemctl restart docker
-sudo systemctl restart jenkins
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt install -y nodejs
+# Redirect output to a log file for debugging
+exec > /var/log/user-data.log 2>&1
+
+# Update package list
+apt update -y
+
+# Install OpenJDK 17
+apt install -y openjdk-17-jdk
+
+# Install unzip
+apt install -y unzip
+
+# Install Jenkins with the correct GPG key
+curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | gpg --dearmor -o /usr/share/keyrings/jenkins-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/jenkins-keyring.gpg] https://pkg.jenkins.io/debian-stable binary/" > /etc/apt/sources.list.d/jenkins.list
+apt update -y
+apt install -y jenkins
+
+# Configure Jenkins Java options
+echo "JAVA_ARGS=\"-Xmx256m -Xms128m\"" >> /etc/default/jenkins
+
+# Start and enable Jenkins
+systemctl start jenkins
+systemctl enable jenkins
+
+# Install Docker
+apt install -y docker.io
+usermod -aG docker jenkins
+systemctl restart docker
+
+# Install Node.js
+curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+apt install -y nodejs
+
+# Install AWS CLI
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip awscliv2.zip
-sudo ./aws/install
+./aws/install
+rm -f awscliv2.zip
+
+# Restart Jenkins to apply group changes
+systemctl restart jenkins
+
+# Log completion
+echo "User data script completed" >> /var/log/user-data.log
 EOF
   tags = {
     Name = "nodejs-logo-server-jenkins"
